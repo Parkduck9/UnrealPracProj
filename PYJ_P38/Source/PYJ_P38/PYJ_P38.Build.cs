@@ -13,10 +13,21 @@ public class PYJ_P38 : ModuleRules
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
-			"Niagara"}
+			"Niagara",
+			// ServerRegistrySubsystem.h exposes HTTP types, so this one has to be public.
+			"HTTP"}
 		);
 
-		PrivateDependencyModuleNames.AddRange(new string[] {  });
+		// Server Registry feature: HTTP talks to the web backend, Json parses its payloads,
+		// Sockets resolves the local address to publish, DeveloperSettings backs the
+		// Project Settings page. See Docs/ARCHITECTURE.md.
+		PrivateDependencyModuleNames.AddRange(new string[] {
+			"Json",
+			"JsonUtilities",
+			"Sockets",
+			"Networking",
+			"DeveloperSettings"}
+		);
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PYJ_P38 Server Registry</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --line: #dfe3e8;
+    --text: #1b1f24;
+    --muted: #666f7a;
+    --accent: #2f6fdb;
+    --ok: #1a8a4a;
+    --off: #b03030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a;
+      --card: #1c2024;
+      --line: #2c3238;
+      --text: #e8eaed;
+      --muted: #9aa4af;
+      --accent: #6ea8ff;
+      --ok: #4ecb7a;
+      --off: #ff7a7a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 48px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 -apple-system, "Segoe UI", Roboto, "Malgun Gothic", sans-serif;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+  .stat {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; min-width: 130px;
+  }
+  .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .stat .value { font-size: 22px; font-weight: 600; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); font-size: 14px; }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  td.addr { font-family: ui-monospace, Consolas, monospace; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
+  .badge.off { color: var(--off); background: color-mix(in srgb, var(--off) 15%, transparent); }
+  .empty { padding: 28px 12px; text-align: center; color: var(--muted); }
+  .err { color: var(--off); font-size: 13px; min-height: 18px; margin-top: 12px; }
+  @media (max-width: 640px) {
+    .hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PYJ_P38 Server Registry</h1>
+  <div class="sub">등록된 데디케이티드 서버 목록. 2초마다 자동 갱신됩니다.</div>
+
+  <div class="stats">
+    <div class="stat"><div class="label">Online</div><div class="value" id="s-online">-</div></div>
+    <div class="stat"><div class="label">Total</div><div class="value" id="s-total">-</div></div>
+    <div class="stat"><div class="label">Players</div><div class="value" id="s-players">-</div></div>
+    <div class="stat"><div class="label">Sessions</div><div class="value" id="s-sessions">-</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Name</th>
+        <th>Address</th>
+        <th class="hide-sm">Map</th>
+        <th>Players</th>
+        <th class="hide-sm">Region</th>
+        <th class="hide-sm">Heartbeat</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      <tr><td class="empty" colspan="7">불러오는 중...</td></tr>
+    </tbody>
+  </table>
+
+  <div class="err" id="err"></div>
+</div>
+
+<script>
+  // The dashboard is just another API client: it logs in like the game does, then polls
+  // GET /api/servers with the bearer token it receives.
+  let token = null;
+
+  const el = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  async function login() {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'dashboard', password: 'dashboard' })
+    });
+    if (!res.ok) throw new Error('login failed: HTTP ' + res.status);
+    token = (await res.json()).token;
+  }
+
+  async function refresh() {
+    try {
+      if (!token) await login();
+
+      let res = await fetch('/api/servers?includeOffline=true', { headers: { Authorization: 'Bearer ' + token } });
+      if (res.status === 401) {            // session expired or the registry restarted
+        await login();
+        res = await fetch('/api/servers?includeOffline=true', { headers: { Authorization: 'Bearer ' + token } });
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
+      const { servers } = await res.json();
+      render(servers);
+
+      const health = await (await fetch('/health')).json();
+      el('s-sessions').textContent = health.sessions;
+      el('err').textContent = '';
+    } catch (e) {
+      el('err').textContent = '레지스트리에 연결할 수 없습니다: ' + e.message;
+    }
+  }
+
+  function render(servers) {
+    el('s-total').textContent = servers.length;
+    el('s-online').textContent = servers.filter((s) => s.online).length;
+    el('s-players').textContent = servers.reduce((sum, s) => sum + s.currentPlayers, 0);
+
+    const rows = el('rows');
+    if (servers.length === 0) {
+      rows.innerHTML = '<tr><td class="empty" colspan="7">등록된 서버가 없습니다. 데디케이티드 서버를 실행하세요.</td></tr>';
+      return;
+    }
+
+    rows.innerHTML = servers.map((s) => `
+      <tr>
+        <td><span class="badge ${s.online ? 'on' : 'off'}">${s.online ? 'ONLINE' : 'OFFLINE'}</span></td>
+        <td>${esc(s.serverName)}</td>
+        <td class="addr">${esc(s.ip)}:${s.port}</td>
+        <td class="hide-sm">${esc(s.mapName) || '-'}</td>
+        <td>${s.currentPlayers} / ${s.maxPlayers || '-'}</td>
+        <td class="hide-sm">${esc(s.region) || '-'}</td>
+        <td class="hide-sm">${s.secondsSinceHeartbeat.toFixed(0)}s ago</td>
+      </tr>`).join('');
+  }
+
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

@@ -81,3 +81,7 @@ SourceArt/**/*.tga
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# .NET build output (WebServer/)
+bin/
+obj/
